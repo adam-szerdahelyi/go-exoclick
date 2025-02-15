@@ -184,8 +184,8 @@ func validateStatisticsOptions(opts *StatisticsOptions) error {
 	}
 
 	for _, hour := range opts.Filter.Hour {
-		if hour < 1 || hour > 23 {
-			return fmt.Errorf("invalid hour: hour must be between 1 and 23, but got %d", hour)
+		if hour < 0 || hour > 23 {
+			return fmt.Errorf("invalid hour: hour must be between 0 and 23, but got %d", hour)
 		}
 	}
 
