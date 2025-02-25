@@ -49,6 +49,7 @@ type Client struct {
 
 	Campaigns   *CampaignsService
 	Category    *CategoryService
+	File        *FileService
 	Marketplace *MarketplaceService
 
 	Statistics *StatisticsService
@@ -120,6 +121,7 @@ func (c *Client) initialize() {
 	c.common.client = c
 	c.Campaigns = (*CampaignsService)(&c.common)
 	c.Category = (*CategoryService)(&c.common)
+	c.File = (*FileService)(&c.common)
 	c.Marketplace = (*MarketplaceService)(&c.common)
 
 	c.Statistics = (*StatisticsService)(&c.common)
