@@ -10,11 +10,11 @@ import (
 type CampaignsService service
 
 type Campaign struct {
-	Campaign           *CampaignData         `json:"campaign,omitempty"`
-	CampaignZones      *[]CampaignZones      `json:"zones,omitempty"`
-	CampaignCategories *CampaignCategories   `json:"categories,omitempty"`
-	CampaignVariations *[]CampaignVariations `json:"variations,omitempty"`
-	ZoneTargeting      *ZoneTargeting        `json:"zone_targeting,omitempty"`
+	Campaign           *CampaignData       `json:"campaign,omitempty"`
+	CampaignZones      *[]CampaignZones    `json:"zones,omitempty"`
+	CampaignCategories *CampaignCategories `json:"categories,omitempty"`
+	Variations         *[]Variation        `json:"variations,omitempty"`
+	ZoneTargeting      *ZoneTargeting      `json:"zone_targeting,omitempty"`
 }
 
 func (c Campaign) String() string {
@@ -48,10 +48,6 @@ type CampaignZones struct {
 type CampaignCategories struct {
 	Targeted []Category `json:"targeted"`
 	Blocked  []Category `json:"blocked"`
-}
-
-type CampaignVariations struct {
-	VariationID *int `json:"idvariation"`
 }
 
 type ZoneTargeting struct {
