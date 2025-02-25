@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	Version          = "v0.0.3"
+	Version          = "v0.0.4"
 	defaultBaseUrl   = "https://api.exoclick.com/v2/"
 	defaultUserAgent = "go-exoclick" + "/" + Version
 
