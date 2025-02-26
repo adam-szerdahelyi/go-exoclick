@@ -159,3 +159,21 @@ func (c *CampaignsService) TargetCategories(ctx context.Context, campaignID int,
 func (c *CampaignsService) BlockCategories(ctx context.Context, campaignID int, categories []int) (*http.Response, error) {
 	return c.ToggleCategories(ctx, campaignID, categories, TargetingOptions{Block})
 }
+
+type Operation string
+
+const (
+	Play  Operation = "play"
+	Pause Operation = "pause"
+)
+
+func (c *CampaignsService) ChangeVariationStatus(ctx context.Context, campaignID int, variationID int, opts Operation) (*http.Response, error) {
+	u := fmt.Sprintf("campaigns/%d/variation/%d/%s", campaignID, variationID, opts)
+
+	req, err := c.client.NewRequest(http.MethodPut, u, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.client.Do(ctx, req, nil)
+}
