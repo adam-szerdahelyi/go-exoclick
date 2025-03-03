@@ -11,26 +11,22 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-querystring/query"
-	"golang.org/x/time/rate"
 )
 
 const (
-	Version          = "v0.0.5"
+	Version          = "v0.0.6"
 	defaultBaseUrl   = "https://api.exoclick.com/v2/"
 	defaultUserAgent = "go-exoclick" + "/" + Version
 
-	headerRateLimit     = "X-Ratelimit-Limit"
-	headerRateRemaining = "X-Ratelimit-Remaining"
-	headerRateReset     = "X-Ratelimit-Reset"
-
-	rateGlobal          = "Global"
-	rateLimitGlobal     = rate.Limit(2.5)
-	rateStatistics      = "Statistics"
-	rateLimitStatistics = rate.Limit(0.5)
+	headerRateLimit     = "x-rate-limit-limit"
+	headerRateRemaining = "x-rate-limit-remaining"
+	headerRateReset     = "x-rate-limit-reset"
 )
 
 var errNonNilContext = errors.New("context must be non-nil")
@@ -43,7 +39,8 @@ type Client struct {
 	authToken AuthToken
 	UserAgent string
 
-	RateLimiter map[string]*rate.Limiter
+	rateMu     sync.Mutex
+	rateLimits [Categories]Rate
 
 	common service
 
@@ -114,10 +111,6 @@ func (c *Client) initialize() {
 		return transport.RoundTrip(req)
 	})
 
-	c.RateLimiter = make(map[string]*rate.Limiter)
-	c.RateLimiter[rateGlobal] = rate.NewLimiter(rateLimitGlobal, 1)
-	c.RateLimiter[rateStatistics] = rate.NewLimiter(rateLimitStatistics, 1)
-
 	c.common.client = c
 	c.Campaigns = (*CampaignsService)(&c.common)
 	c.Category = (*CategoryService)(&c.common)
@@ -134,9 +127,9 @@ func (c *Client) bareDo(ctx context.Context, caller *http.Client, req *http.Requ
 
 	req = req.WithContext(ctx)
 
-	cat := GetRateLimitCategory(req.URL.Path)
+	rateLimitCategory := GetRateLimitCategory(req.URL.Path)
 
-	err := c.RateLimiter[cat].Wait(ctx)
+	err := c.checkRateLimitBeforeDo(req, rateLimitCategory)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +145,10 @@ func (c *Client) bareDo(ctx context.Context, caller *http.Client, req *http.Requ
 
 		return resp, err
 	}
+
+	c.rateMu.Lock()
+	c.rateLimits[rateLimitCategory] = parseRate(resp)
+	c.rateMu.Unlock()
 
 	err = CheckResponse(resp)
 
@@ -308,12 +305,13 @@ func (r *ErrorResponse) Error() string {
 	return fmt.Sprintf("%v", r.Message)
 }
 
-func GetRateLimitCategory(path string) string {
-	if strings.HasPrefix(path, "/statistics/") {
-		return rateStatistics
+func GetRateLimitCategory(path string) RateLimitCategory {
+	switch {
+	default:
+		return CoreCategory
+	case strings.Contains(path, "/statistics/"):
+		return StatisticsCategory
 	}
-
-	return rateGlobal
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -398,4 +396,56 @@ func (tz *TimeZone) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 	return json.Marshal(tz.String())
+}
+
+type RateLimitCategory uint8
+
+const (
+	CoreCategory RateLimitCategory = iota
+	StatisticsCategory
+
+	Categories
+)
+
+func (c *Client) checkRateLimitBeforeDo(req *http.Request, rateLimitCategory RateLimitCategory) error {
+	c.rateMu.Lock()
+	rate := c.rateLimits[rateLimitCategory]
+	c.rateMu.Unlock()
+
+	if !rate.Reset.IsZero() && rate.Remaining == 0 && time.Now().Before(rate.Reset) {
+		return sleepUntilResetWithBuffer(req.Context(), rate.Reset)
+	}
+
+	return nil
+}
+
+func sleepUntilResetWithBuffer(ctx context.Context, reset time.Time) error {
+	buffer := time.Second
+	timer := time.NewTimer(time.Until(reset) + buffer)
+	select {
+	case <-ctx.Done():
+		if !timer.Stop() {
+			<-timer.C
+		}
+		return ctx.Err()
+	case <-timer.C:
+	}
+	return nil
+}
+
+func parseRate(r *http.Response) Rate {
+	var rate Rate
+	if limit := r.Header.Get(headerRateLimit); limit != "" {
+		rate.Limit, _ = strconv.Atoi(limit)
+	}
+	if remaining := r.Header.Get(headerRateRemaining); remaining != "" {
+		rate.Remaining, _ = strconv.Atoi(remaining)
+	}
+	if reset := r.Header.Get(headerRateReset); reset != "" {
+		if v, _ := strconv.Atoi(reset); v != 0 {
+			rate.Reset = time.Now().Add(time.Duration(v) * time.Second)
+		}
+	}
+
+	return rate
 }
