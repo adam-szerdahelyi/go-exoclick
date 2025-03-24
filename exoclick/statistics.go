@@ -2,12 +2,12 @@ package exoclick
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gocarina/gocsv"
@@ -15,33 +15,22 @@ import (
 
 type StatisticsService service
 
-type CustomFloat float64
-
-func (cf *CustomFloat) UnmarshalCSV(csv string) (err error) {
-	s := strings.Replace(csv, ",", "", -1)
-	t, err := strconv.ParseFloat(s, 64)
-
-	*cf = CustomFloat(t)
-
-	return err
-}
-
 type Statistic struct {
-	Date             *time.Time  `csv:"date,omitempty"`
-	CampaignID       *int        `csv:"campaign_id,omitempty"`
-	VariationID      *int        `csv:"variation_id,omitempty"`
-	SiteID           *int        `csv:"site_id,omitempty"`
-	SiteName         *string     `csv:"site_name,omitempty"`
-	ZoneID           *int        `csv:"zone_id,omitempty"`
-	ZoneName         *string     `csv:"zone_name,omitempty"`
-	CategoryID       *int        `csv:"category_id,omitempty"`
-	Clicks           int         `csv:"clicks"`
-	Impressions      int         `csv:"impressions"`
-	VideoImpressions int         `csv:"video_impressions"`
-	VideoViews       int         `csv:"video_views"`
-	G1               int         `csv:"g1"`
-	G5               int         `csv:"g5"`
-	Cost             CustomFloat `csv:"cost"`
+	Date             *time.Time `csv:"date,omitempty"`
+	CampaignID       *int       `csv:"campaign_id,omitempty"`
+	VariationID      *int       `csv:"variation_id,omitempty"`
+	SiteID           *int       `csv:"site_id,omitempty"`
+	SiteName         *string    `csv:"site_name,omitempty"`
+	ZoneID           *int       `csv:"zone_id,omitempty"`
+	ZoneName         *string    `csv:"zone_name,omitempty"`
+	CategoryID       *int       `csv:"category_id,omitempty"`
+	Clicks           int        `csv:"clicks"`
+	Impressions      int        `csv:"impressions"`
+	VideoImpressions int        `csv:"video_impressions"`
+	VideoViews       int        `csv:"video_views"`
+	G1               int        `csv:"g1"`
+	G5               int        `csv:"g5"`
+	Cost             float32    `csv:"cost"`
 }
 
 func (s Statistic) String() string {
@@ -120,30 +109,6 @@ type StatisticsOrderBy struct {
 	Order OrderType       `json:"order,omitempty"`
 }
 
-// func (s *StatisticsService) GetStatistics(ctx context.Context, opts *StatisticsOptions) ([]*Statistic, *http.Response, error) {
-// 	u := "statistics/a/global"
-
-// 	if err := validateStatisticsOptions(opts); err != nil {
-// 		return nil, nil, err
-// 	}
-
-// 	req, err := s.client.NewRequest(http.MethodPost, u, opts)
-// 	if err != nil {
-// 		return nil, nil, err
-// 	}
-
-// 	statisticsResponse := struct {
-// 		Result []*Statistic `json:"result,omitempty"`
-// 	}{}
-
-// 	resp, err := s.client.Do(ctx, req, &statisticsResponse)
-// 	if err != nil {
-// 		return nil, resp, err
-// 	}
-
-// 	return statisticsResponse.Result, resp, nil
-// }
-
 func (s *StatisticsService) GetStatisticsCSV(ctx context.Context, opts *StatisticsOptions) ([]*Statistic, *http.Response, error) {
 	u := "statistics/a/global"
 
@@ -165,13 +130,63 @@ func (s *StatisticsService) GetStatisticsCSV(ctx context.Context, opts *Statisti
 
 	defer resp.Body.Close()
 
-	var statistics []*Statistic
-
-	if err := gocsv.Unmarshal(resp.Body, &statistics); err != nil {
+	statistics, err := UnmarshalStatisticsCSV(resp.Body, opts.OutputCsvFields)
+	if err != nil {
 		return nil, resp, err
 	}
 
 	return statistics, resp, nil
+}
+
+func UnmarshalStatisticsCSV(data io.Reader, outputCSVFields []StatisticsField) ([]*Statistic, error) {
+	headerNormalizer := func(headers []string) []string {
+		if len(headers) != len(outputCSVFields) {
+			fmt.Printf("invalid header count, expected: %d, got: %d", len(outputCSVFields), len(headers))
+			return nil
+		}
+
+		normalizedHeaders := make([]string, len(headers))
+
+		for i := range headers {
+			normalizedHeaders[i] = string(outputCSVFields[i])
+		}
+
+		return normalizedHeaders
+	}
+
+	r := csv.NewReader(data)
+	r.FieldsPerRecord = len(outputCSVFields)
+
+	u, err := gocsv.NewUnmarshaller(r, Statistic{})
+	if err != nil {
+		return nil, err
+	}
+
+	err = u.RenormalizeHeaders(headerNormalizer)
+	if err != nil {
+		return nil, err
+	}
+
+	var statistics []*Statistic
+
+	for {
+		obj, err := u.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return nil, err
+			}
+		}
+
+		if s, ok := obj.(Statistic); ok {
+			statistics = append(statistics, &s)
+		} else {
+			return nil, errors.New("failed to parse type")
+		}
+	}
+
+	return statistics, nil
 }
 
 func validateStatisticsOptions(opts *StatisticsOptions) error {
