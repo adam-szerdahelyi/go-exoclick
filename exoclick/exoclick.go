@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	Version          = "v0.0.7"
+	Version          = "v0.0.8"
 	defaultBaseUrl   = "https://api.exoclick.com/v2/"
 	defaultUserAgent = "go-exoclick" + "/" + Version
 
@@ -98,9 +98,9 @@ func (c *Client) initialize() {
 	c.client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		if !strings.Contains(req.URL.Path, "login") {
 			if c.authToken.TokenExpiryDate.Before(time.Now()) {
-				err := c.Login()
+				resp, err := c.Login()
 				if err != nil {
-					return nil, err
+					return resp, err
 				}
 			}
 
@@ -220,10 +220,10 @@ func (c *Client) NewRequest(method, urlStr string, body interface{}, opts ...str
 	return req, nil
 }
 
-func (c *Client) Login() error {
+func (c *Client) Login() (*http.Response,error) {
 	url, err := c.BaseURL.Parse("login")
 	if err != nil {
-		return err
+		return nil,err
 	}
 
 	input := map[string]any{
@@ -232,38 +232,38 @@ func (c *Client) Login() error {
 
 	body, err := json.Marshal(input)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req, err := http.NewRequest(http.MethodPost, url.String(), bytes.NewBuffer(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return err
+		return resp, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return err
+		return resp, errors.New("authentication failed")
 	}
 
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return resp, err
 	}
 
 	err = json.Unmarshal(bodyBytes, &c.authToken)
 	if err != nil {
-		return err
+		return resp, err
 	}
 
 	c.authToken.TokenExpiryDate = time.Now().Add(time.Duration(c.authToken.TokenExpiry) * time.Second)
 
-	return nil
+	return resp, nil
 }
 
 type ErrorResponse struct {
